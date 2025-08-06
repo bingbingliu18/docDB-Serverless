@@ -27,6 +27,7 @@ from botocore.exceptions import ClientError
 
 priceList = []
 counter = 0
+storage_cache = {}  # Cache for cluster storage utilization to avoid duplicate queries
 
 IMG_WIDTH = 600
 IMG_HEIGHT = 400
@@ -494,9 +495,9 @@ def get_docdb_cpu_utilization(instance_id, region):
     else:
         return None
 
-def get_docdb_storage_utilization(instance_id, region):
+def get_docdb_storage_utilization(cluster_id, region):
     """
-    Get storage utilization for a given DocumentDB instance.
+    Get storage utilization for a given DocumentDB cluster.
     """
     cloudwatch_client = boto3.client('cloudwatch', region_name=region)
 
@@ -510,8 +511,8 @@ def get_docdb_storage_utilization(instance_id, region):
                         'MetricName': 'VolumeBytesUsed',
                         'Dimensions': [
                             {
-                                'Name': 'DBInstanceIdentifier',
-                                'Value': instance_id
+                                'Name': 'DBClusterIdentifier',
+                                'Value': cluster_id
                             }
                         ]
                     },
@@ -778,12 +779,28 @@ def process_instance(instance, instance_count, dcu_price_per_hour):
             max_cpu_util = 0
             logging.warning(f"Instance {instance_id} has no CPU utilization data")
         
-        # Get storage utilization for this specific instance
-        storage_utils = get_docdb_storage_utilization(instance_id, docdb_region)
+        # Get storage utilization for this cluster (with caching)
+        global storage_cache
         storage_used_gb = 0
-        if storage_utils and storage_utils.get('storage_used') and storage_utils.get('storage_used')['values']:
-            storage_used_bytes = storage_utils.get('storage_used')['values'][0]
-            storage_used_gb = round(storage_used_bytes / (1024**3), 2)  # Convert to GB
+        
+        if cluster_id:  # Only query if cluster_id exists
+            if cluster_id in storage_cache:
+                # Use cached result
+                storage_used_gb = storage_cache[cluster_id]
+                logging.info(f"Using cached storage data for cluster {cluster_id}: {storage_used_gb} GB")
+            else:
+                # Query and cache the result
+                storage_utils = get_docdb_storage_utilization(cluster_id, docdb_region)
+                if storage_utils and storage_utils.get('storage_used') and storage_utils.get('storage_used')['values']:
+                    storage_used_bytes = storage_utils.get('storage_used')['values'][0]
+                    storage_used_gb = round(storage_used_bytes / (1024**3), 2)  # Convert to GB
+                    storage_cache[cluster_id] = storage_used_gb
+                    logging.info(f"Queried and cached storage data for cluster {cluster_id}: {storage_used_gb} GB")
+                else:
+                    storage_cache[cluster_id] = 0
+                    logging.warning(f"No storage data found for cluster {cluster_id}")
+        else:
+            logging.warning(f"Instance {instance_id} has no cluster_id, storage set to 0")
         
         # Calculate On-Demand cost for single instance
         od_monthly_cost = round(730 * od_price_per_unit, 2)
@@ -851,6 +868,9 @@ def main():
     """
     Main function: Get DocumentDB instance information and generate cost comparison report
     """
+    global storage_cache
+    storage_cache = {}  # Clear storage cache at the start of each run
+    
     output_result = []
     avg_cpu_list = []
     output_result_chart = []
@@ -948,7 +968,7 @@ def main():
     output_column = (
         "account_id,region,instance_id,cluster_id,engine,engine_version,instance_type,vcpu,"
         "CPU Avg Util%,CPU Min Util%,CPU Max Util%,StartTime,EndTime,"
-        "OnDemand Monthly Cost,Storage Used(GB),DCU Price/Hr,Min DCU Baseline,"
+        "OnDemand Monthly Cost,Cluster Storage Used(GB),DCU Price/Hr,Min DCU Baseline,"
         "Serverless Cost Method1,Cost Savings Method1,Savings % Method1,Recommendation Method1,"
         "Serverless Cost Method2,Cost Savings Method2,Savings % Method2,Recommendation Method2"
     )
