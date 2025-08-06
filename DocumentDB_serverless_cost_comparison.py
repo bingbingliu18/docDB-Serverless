@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
 DocumentDB Serverless vs On-Demand Cost Comparison Tool
-Modified from DocumentDB_cluster_resource_evaluation_tools.py
-References cost calculation logic from Aurora_ASv2_evaluation_tools_for_global_region.py
 """
 
 import boto3
@@ -259,7 +257,7 @@ def get_docdb_dcu_price(docdb_region):
         # If no specific pricing found, use region-based estimated pricing
         logging.warning("No DocumentDB Serverless DCU pricing found in API, using region-based estimates")
         
-        # Region-specific estimated DCU pricing based on Aurora Serverless v2
+        # Region-specific estimated DCU pricing
         region_dcu_pricing = {
             'us-east-1': 0.0822,      # Standard DCU price
             'us-east-2': 0.0822,
@@ -331,31 +329,33 @@ def pricing_get_products_optimized(docdb_region):
 def calculate_serverless_cost_estimate(vcpu, avg_cpu_util, min_cpu_util, max_cpu_util, dcu_price_per_hour, cpu_percent_data=None):
     """
     Calculate estimated DocumentDB Serverless cost using dual methods for a single instance
-    Method 1: Simple average-based calculation (完全遵循Aurora ASv2逻辑)
+    Method 1: Simple average-based calculation
     Method 2: Detailed calculation with minimum DCU + elastic scaling cost
     """
     
-    # Method 1: Simple average-based calculation (完全遵循Aurora ASv2方式)
-    # 使用Aurora的计算公式：avg_acu = math.ceil(avg_cpu_util/100*int(vcpu)*4)
+    # Method 1: Simple average-based calculation
+    # Calculate average DCU based on CPU utilization
     avg_dcu = math.ceil(avg_cpu_util / 100 * int(vcpu) * 4)
     serverless_cost_method1 = avg_dcu * 730 * dcu_price_per_hour
     
-    logging.info(f"Method 1 - Aurora ASv2 style calculation: vCPU={vcpu}, avg_cpu_util={avg_cpu_util}%, "
+    logging.info(f"Method 1 - Simple calculation: vCPU={vcpu}, avg_cpu_util={avg_cpu_util}%, "
                 f"calculated avg_dcu={avg_dcu}, "
                 f"monthly cost per instance=${avg_dcu * 730 * dcu_price_per_hour:.2f}")
     
-    # Method 2: Detailed calculation with minimum DCU + elastic scaling (参考Aurora ASv2方式)
-    # 计算最小DCU基线：基于平均CPU和最小CPU利用率
+    # Method 2: Detailed calculation with minimum DCU + elastic scaling
+    # Calculate minimum DCU baseline based on average and minimum CPU utilization
+    # Method 2: Detailed calculation with minimum DCU + elastic scaling
+    # Calculate minimum DCU baseline based on average and minimum CPU utilization
     min_dcu_baseline = math.ceil((avg_cpu_util + min_cpu_util) / 100 / 2 * int(vcpu) * 4)
-    min_dcu_baseline = max(0.5, min_dcu_baseline)  # 确保最小0.5 DCU
+    min_dcu_baseline = max(0.5, min_dcu_baseline)  # Ensure minimum 0.5 DCU
     
-    # 基础费用（最小DCU）
+    # Base cost (minimum DCU)
     base_cost_total = min_dcu_baseline * dcu_price_per_hour * 730
     
-    # 计算弹性扩展费用（如果有详细CPU数据）
+    # Calculate elastic scaling cost (if detailed CPU data is available)
     elastic_cost_total = 0
     if cpu_percent_data and len(cpu_percent_data) > 0:
-        # 计算弹性扩展阈值
+        # Calculate elastic scaling threshold
         elastic_threshold = (avg_cpu_util + min_cpu_util) / 2
         
         logging.info(f"Calculating elastic cost with threshold: {elastic_threshold}%")
@@ -365,22 +365,22 @@ def calculate_serverless_cost_estimate(vcpu, avg_cpu_util, min_cpu_util, max_cpu
         
         for cpu_value in cpu_percent_data:
             if cpu_value > elastic_threshold:
-                # 计算超出基线所需的DCU (使用4倍系数)
+                # Calculate DCU required above baseline (using 4x multiplier)
                 required_dcu = math.ceil(cpu_value / 100 * int(vcpu) * 4)
                 additional_dcu = max(0, required_dcu - min_dcu_baseline)
                 
-                # 按分钟计费的额外费用
+                # Additional cost charged per minute
                 additional_cost = additional_dcu * dcu_price_per_hour / 60
                 sum_exceed_cost += additional_cost
                 exceed_count += 1
         
-        # 总弹性费用
+        # Total elastic cost
         elastic_cost_total = sum_exceed_cost
         
         logging.info(f"Elastic scaling: {exceed_count} data points exceeded threshold, "
                     f"additional cost per instance=${sum_exceed_cost:.2f}")
     
-    # 方法2总费用
+    # Method 2 total cost
     serverless_cost_method2 = base_cost_total + elastic_cost_total
     
     logging.info(f"Method 2 - Detailed calculation: min_dcu_baseline={min_dcu_baseline}, "
