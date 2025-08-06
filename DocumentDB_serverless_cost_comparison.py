@@ -255,52 +255,13 @@ def get_docdb_dcu_price(docdb_region):
                             logging.info(f"Found DCU-related price: ${price_per_unit} per {unit}")
                             return price_per_unit
         
-        # If no specific pricing found, use region-based estimated pricing
-        logging.warning("No DocumentDB Serverless DCU pricing found in API, using region-based estimates")
-        
-        # Region-specific estimated DCU pricing
-        region_dcu_pricing = {
-            'us-east-1': 0.0822,      # Standard DCU price
-            'us-east-2': 0.0822,
-            'us-west-1': 0.0904,
-            'us-west-2': 0.0822,
-            'ap-northeast-1': 0.0986,
-            'ap-northeast-2': 0.0986,
-            'ap-southeast-1': 0.0986,
-            'ap-southeast-2': 0.0986,
-            'ap-south-1': 0.0904,
-            'ap-east-1': 0.1068,
-            'eu-central-1': 0.0986,
-            'eu-west-1': 0.0904,
-            'eu-west-2': 0.0986,
-            'eu-west-3': 0.0986,
-            'eu-north-1': 0.0822,
-            'ca-central-1': 0.0904,
-            'me-south-1': 0.1068,
-            'sa-east-1': 0.1150
-        }
-        
-        estimated_price = region_dcu_pricing.get(docdb_region, 0.0905)  # Default IO-optimized price
-        logging.info(f"Using estimated DCU price for {docdb_region}: ${estimated_price} per DCU-Hr")
-        return estimated_price
+        # If no specific pricing found, raise an exception
+        logging.error("No DocumentDB Serverless DCU pricing found in API")
+        raise Exception("Unable to retrieve DocumentDB Serverless DCU pricing from AWS Pricing API")
         
     except Exception as e:
         logging.error(f"Error retrieving DCU price: {e}")
-        # Return region-specific fallback price
-        region_fallback_pricing = {
-            'us-east-1': 0.0822,
-            'us-east-2': 0.0822,
-            'us-west-1': 0.0904,
-            'us-west-2': 0.0822,
-            'ap-northeast-1': 0.0986,
-            'ap-southeast-1': 0.0986,
-            'eu-west-1': 0.0904,
-            'eu-central-1': 0.0986,
-        }
-        
-        fallback_price = region_fallback_pricing.get(docdb_region, 0.0905)
-        logging.info(f"Using fallback DCU price for {docdb_region}: ${fallback_price} per DCU-Hr")
-        return fallback_price
+        raise Exception(f"Failed to retrieve DocumentDB Serverless DCU pricing: {e}")
 
 def pricing_get_products_optimized(docdb_region):
     """
