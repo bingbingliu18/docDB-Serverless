@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
 DocumentDB Serverless vs On-Demand Cost Comparison Tool
+Note: This tool prioritizes IO-Optimized pricing for On-Demand instances
+to provide more accurate cost comparisons with Serverless (which uses IO-Optimized storage).
+Falls back to Standard pricing if IO-Optimized is not available.
 """
 
 import boto3
@@ -140,17 +143,44 @@ def get_all_pages(pricing_client, service_code, filters, max_retries=5):
 def pricing_get_product(engine, instance_class=None):
     """
     Get DocumentDB product pricing information from price list
+    Prioritizes IO-Optimized pricing over Standard pricing
     """
     global priceList
-    logging.info(f"Searching for price: instance_class={instance_class}, engine={engine}")
+    logging.info(f"Searching for IO-Optimized price: instance_class={instance_class}, engine={engine}")
+    
+    # First pass: Look for IO-Optimized pricing
+    io_optimized_price = None
+    standard_price = None
+    
     for price in priceList:
         if (price['product']['productFamily'] == 'Database Instance' and 
             price['product']['attributes']['databaseEngine'].lower() == engine.lower() and 
             price['product']['attributes']['instanceType'] == instance_class):
-            return price
-    logging.error(f'param: engine={engine}, instanceType={instance_class}')
-    logging.info(f'priceList Dump: {json.dumps(priceList, indent=2)}')
-    raise Exception('price not found')
+            
+            # Check if this is IO-Optimized or Standard
+            usage_type = price['product']['attributes'].get('usagetype', '').lower()
+            volume_type = price['product']['attributes'].get('volumeType', '').lower()
+            
+            # Identify IO-Optimized pricing
+            if ('iooptimized' in usage_type or 'io-optimized' in volume_type):
+                io_optimized_price = price
+                logging.info(f"Found IO-Optimized pricing: usage_type={usage_type}, volume_type={volume_type}")
+            # Identify Standard pricing
+            elif ('general purpose' in volume_type and 'iooptimized' not in usage_type):
+                standard_price = price
+                logging.info(f"Found Standard pricing: usage_type={usage_type}, volume_type={volume_type}")
+    
+    # Return IO-Optimized price if available, otherwise fall back to Standard
+    if io_optimized_price:
+        logging.info(f"Using IO-Optimized pricing for {instance_class}")
+        return io_optimized_price
+    elif standard_price:
+        logging.warning(f"IO-Optimized pricing not found for {instance_class}, falling back to Standard pricing")
+        return standard_price
+    else:
+        logging.error(f'No pricing found for: engine={engine}, instanceType={instance_class}')
+        logging.info(f'priceList Dump: {json.dumps(priceList, indent=2)}')
+        raise Exception('price not found')
 
 def get_docdb_dcu_price(docdb_region):
     """
@@ -716,16 +746,24 @@ def process_instance(instance, instance_count, dcu_price_per_hour):
     account_id = instance['DBInstanceArn'].split(':')[4]
     
     try:
-        # Get pricing information
+        # Get IO-Optimized pricing information (falls back to Standard if IO-Optimized not available)
         product_json = pricing_get_product(engine="Amazon DocumentDB", instance_class=instance_class)
         vcpu = int(product_json['product']['attributes']['vcpu'])
         
-        # Get OD unit price
+        # Log the pricing type being used
+        usage_type = product_json['product']['attributes'].get('usagetype', '')
+        volume_type = product_json['product']['attributes'].get('volumeType', '')
+        if 'iooptimized' in usage_type.lower() or 'io-optimized' in volume_type.lower():
+            pricing_type = "IO-Optimized"
+        else:
+            pricing_type = "Standard"
+        
+        # Get On-Demand unit price
         od_price_per_unit = 0
         for offer_term_code, offer_term_data in product_json['terms']["OnDemand"].items():
             for price_dimension_code, price_dimension_data in offer_term_data["priceDimensions"].items():
                 od_price_per_unit = round(float(price_dimension_data["pricePerUnit"]["USD"]), 3)
-                logging.info(f"OD Price per unit: {od_price_per_unit}")
+                logging.info(f"On-Demand {pricing_type} price per unit: ${od_price_per_unit}")
                 break
         
         # Get CPU utilization for this specific instance
