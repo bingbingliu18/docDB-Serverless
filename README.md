@@ -195,6 +195,71 @@ monthly_serverless_cost = total_dcu_hours * dcu_price_per_hour
 - **错误恢复**: 完善的异常处理和重试机制
 - **进度跟踪**: 实时显示处理进度和状态
 
+## 🔄 MongoDB 到 DocumentDB Serverless 成本评估工具
+
+### MongoDB_to_DocumentDB_Serverless_evaluation.py 应用使用
+
+专门用于评估自建 MongoDB 与 DocumentDB Serverless 的成本对比分析工具。
+
+#### 工具功能
+- **自动发现**: 通过 EC2 标签自动发现需要评估的 MongoDB 实例
+- **成本对比分析**: 计算自建 MongoDB 与 DocumentDB Serverless 的月度成本差异
+- **资源使用评估**: 基于 MongoDB EC2 实例的 CPU 使用情况估算 DCU 需求
+- **成本节省计算**: 提供详细的成本节省金额和百分比分析
+
+#### 评估前准备
+在运行工具前，需要为要评估的 MongoDB EC2 实例打上标签：
+```bash
+# 为 MongoDB EC2 实例添加评估标签
+aws ec2 create-tags --resources i-1234567890abcdef0 --tags Key=docDB-serverless-eva,Value=true
+
+# 批量为多个实例添加标签
+aws ec2 create-tags --resources i-1234567890abcdef0 i-0987654321fedcba0 --tags Key=docDB-serverless-eva,Value=true
+```
+
+#### 运行方式
+```bash
+# 运行 MongoDB 成本评估工具
+python3 MongoDB_to_DocumentDB_Serverless_evaluation.py
+```
+
+#### 工作流程
+1. **实例发现**: 自动扫描带有 `docDB-serverless-eva=true` 标签的 EC2 实例
+2. **数据采集**: 收集过去30天的 CPU 使用率和实例配置信息
+3. **成本计算**: 计算当前 EC2 成本和预估的 DocumentDB Serverless 成本
+4. **报告生成**: 生成详细的成本对比分析报告
+
+#### 输出报告
+- **Excel 报告**: `mongodb_to_docdb_cost_comparison.xlsx`
+- **成本对比图表**: 直观显示成本差异的柱状图
+- **日志文件**: `mongodb_evaluation_log_YYYYMMDD_HHMMSS.log`
+
+#### 示例输出
+```
+=== MongoDB 到 DocumentDB Serverless 成本评估 ===
+发现MongoDB实例数量: 3
+当前自建MongoDB月成本: $1,234.56
+预估DocumentDB Serverless月成本: $987.65
+预计月度节省: $246.91
+节省百分比: 20.0%
+
+推荐迁移到Serverless的实例: 2
+推荐保持现状的实例: 1
+```
+
+#### 权限要求
+除了基本的 DocumentDB 和 CloudWatch 权限外，还需要：
+```json
+{
+    "Effect": "Allow",
+    "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeTags"
+    ],
+    "Resource": "*"
+}
+```
+
 ## 🔐 权限要求
 
 ### 必需的 IAM 权限
